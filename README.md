@@ -280,6 +280,14 @@ Mission, member, and reward data lives in **in-memory server state**. Restarting
 | Source code | Firebase Admin SDK service account JSON |
 | `.env.example` (placeholders only) | OAuth client secrets (server-side) |
 
+
+<img width="1536" height="775" alt="Screenshot 2026-06-30 232820" src="https://github.com/user-attachments/assets/403bbca0-c7a8-47bb-adb8-c8d5de4ac8af" />
+<img width="1536" height="780" alt="Screenshot 2026-06-30 232919" src="https://github.com/user-attachments/assets/d5cdb24a-6409-4304-994a-6425f0f643a7" />
+<img width="1536" height="782" alt="Screenshot 2026-06-30 232935" src="https://github.com/user-attachments/assets/429fcd1f-854f-4095-aae9-f9270ea27b4c" />
+<img width="1536" height="752" alt="Screenshot 2026-06-30 232953" src="https://github.com/user-attachments/assets/5a468373-57b8-4af0-a4f1-bd6a18567e74" />
+<img width="1523" height="726" alt="Screenshot 2026-06-30 233023" src="https://github.com/user-attachments/assets/8f32b2c6-006a-4c8d-a3f2-73caadd7a217" />
+
+
 ---
 
 ## License
