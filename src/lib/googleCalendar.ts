@@ -7,6 +7,7 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   User,
+  UserCredential,
 } from "firebase/auth";
 import firebaseConfig from "../../firebase-applet-config.json";
 
@@ -20,11 +21,11 @@ provider.addScope("https://www.googleapis.com/auth/calendar.events.readonly");
 const TOKEN_KEY = "deadlinex-google-token";
 const SSO_ROLE_KEY = "deadlinex-sso-role";
 
+const isBrowser = typeof window !== "undefined";
+
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
-let redirectHandled = false;
-
-const isBrowser = typeof window !== "undefined";
+let redirectResultPromise: Promise<UserCredential | null> | null = null;
 
 /** Popup auth is unreliable on deployed hosts; redirect is safer in production. */
 export const shouldUseRedirectAuth = (): boolean => {
@@ -97,11 +98,13 @@ export const handleAuthRedirect = async (): Promise<{
   accessToken: string | null;
   role: string;
 } | null> => {
-  if (!isBrowser || redirectHandled) return null;
+  if (!isBrowser) return null;
 
   try {
-    const result = await getRedirectResult(auth);
-    redirectHandled = true;
+    if (!redirectResultPromise) {
+      redirectResultPromise = getRedirectResult(auth);
+    }
+    const result = await redirectResultPromise;
     if (!result) return null;
 
     const credential = GoogleAuthProvider.credentialFromResult(result);
@@ -114,7 +117,6 @@ export const handleAuthRedirect = async (): Promise<{
       role: consumeSsoRole(),
     };
   } catch (error) {
-    redirectHandled = true;
     console.error("Redirect sign-in error:", error);
     throw error;
   }

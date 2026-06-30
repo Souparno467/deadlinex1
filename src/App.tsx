@@ -13,6 +13,7 @@ import {
   syncGoogleCalendarWithBackend,
   handleAuthRedirect,
   getFriendlyAuthError,
+  consumeSsoRole,
 } from "./lib/googleCalendar";
 
 import { 
@@ -140,70 +141,70 @@ export default function App() {
     }
   };
 
-  const bootstrapAuthenticatedUser = async (
+  const bootstrapAuthenticatedUser = (
     user: any,
     token: string | null,
     role: string = "employee"
   ) => {
+    if (bootstrappedUidRef.current === user.uid) return;
     setSsoError(null);
     setSsoRole(role === "manager" ? "manager" : "employee");
     bootstrappedUidRef.current = user.uid;
     setGoogleUser(user);
     setGoogleToken(token);
-    await checkAndRegisterSsoUser(user, role);
-    await fetchState();
-    void runCalendarSync(token);
+    setAuthBootstrapping(false);
+
+    void (async () => {
+      await checkAndRegisterSsoUser(user, role);
+      await fetchState();
+      void runCalendarSync(token);
+    })();
   };
 
-  // Initialize Google Auth listener on mount
+  // Initialize Google Auth listener on mount — subscribe immediately; never block on redirect/API
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
     let cancelled = false;
 
     const finishAuthBootstrap = () => {
       if (!cancelled) setAuthBootstrapping(false);
     };
 
-    const boot = async () => {
+    const safetyTimeout = window.setTimeout(finishAuthBootstrap, 4000);
+
+    const unsubscribe = initAuth(
+      (user, token) => {
+        window.clearTimeout(safetyTimeout);
+        bootstrapAuthenticatedUser(user, token, consumeSsoRole());
+      },
+      () => {
+        window.clearTimeout(safetyTimeout);
+        setGoogleUser(null);
+        setGoogleToken(null);
+        finishAuthBootstrap();
+      }
+    );
+
+    void (async () => {
       try {
         const redirectResult = await handleAuthRedirect();
-        if (cancelled) return;
-
-        if (redirectResult) {
-          await bootstrapAuthenticatedUser(
-            redirectResult.user,
-            redirectResult.accessToken,
-            redirectResult.role
-          );
-        }
+        if (cancelled || !redirectResult) return;
+        bootstrapAuthenticatedUser(
+          redirectResult.user,
+          redirectResult.accessToken,
+          redirectResult.role
+        );
       } catch (err) {
         if (!cancelled) {
           setSsoError(getFriendlyAuthError(err));
+          finishAuthBootstrap();
         }
       }
-
-      unsubscribe = initAuth(
-        async (user, token) => {
-          if (bootstrappedUidRef.current === user.uid) {
-            finishAuthBootstrap();
-            return;
-          }
-          await bootstrapAuthenticatedUser(user, token, "employee");
-          finishAuthBootstrap();
-        },
-        () => {
-          setGoogleUser(null);
-          setGoogleToken(null);
-          finishAuthBootstrap();
-        }
-      );
-    };
-
-    void boot();
+    })();
 
     return () => {
       cancelled = true;
-      unsubscribe?.();
+      window.clearTimeout(safetyTimeout);
+      unsubscribe();
     };
   }, []);
 
@@ -235,7 +236,7 @@ export default function App() {
       if (!res) return;
       localStorage.removeItem("deadlinex-demo-mode");
       setUseDemoMode(false);
-      await bootstrapAuthenticatedUser(res.user, res.accessToken, role);
+      bootstrapAuthenticatedUser(res.user, res.accessToken, role);
     } catch (err) {
       console.error("Google login failed:", err);
       setSsoError(getFriendlyAuthError(err));
@@ -776,7 +777,7 @@ export default function App() {
     }
   };
 
-  if (loading) {
+  if (loading && !googleUser && !useDemoMode) {
     return (
       <div className={`min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4 ${theme === "light" ? "light" : ""}`}>
         <Bot className="w-12 h-12 text-red-500 animate-bounce" />
@@ -785,7 +786,7 @@ export default function App() {
     );
   }
 
-  // 1. SPLIT-PANEL LOGIN VIEW (skip when demo mode is active)
+  // Brief auth check — capped at 4s by safety timeout; never blocks signed-in users
   if (authBootstrapping && !googleUser && !useDemoMode) {
     return (
       <div className={`min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4 ${theme === "light" ? "light" : ""}`}>
