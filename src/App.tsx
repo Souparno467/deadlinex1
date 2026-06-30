@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./components/Dashboard";
 import MissionsList from "./components/MissionsList";
@@ -10,7 +10,9 @@ import {
   initAuth, 
   googleSignIn, 
   logout, 
-  syncGoogleCalendarWithBackend 
+  syncGoogleCalendarWithBackend,
+  handleAuthRedirect,
+  getFriendlyAuthError,
 } from "./lib/googleCalendar";
 
 import { 
@@ -81,13 +83,30 @@ export default function App() {
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [googleSyncing, setGoogleSyncing] = useState<boolean>(false);
   const [googleLastSynced, setGoogleLastSynced] = useState<Date | null>(null);
+  const [ssoError, setSsoError] = useState<string | null>(null);
+  const [authBootstrapping, setAuthBootstrapping] = useState<boolean>(true);
+  const [ssoRole, setSsoRole] = useState<"manager" | "employee">("employee");
+  const bootstrappedUidRef = React.useRef<string | null>(null);
+
+  const runCalendarSync = async (token: string | null) => {
+    if (!token) return;
+    try {
+      setGoogleSyncing(true);
+      await syncGoogleCalendarWithBackend(token);
+      setGoogleLastSynced(new Date());
+      fetchState();
+    } catch (e) {
+      console.error("Google Calendar sync failed:", e);
+    } finally {
+      setGoogleSyncing(false);
+    }
+  };
 
   // Auto-onboard Google SSO accounts to team database
   const checkAndRegisterSsoUser = async (user: any, roleToRegister: string = "employee") => {
     if (!user || !user.email) return;
     try {
       const emailLower = user.email.toLowerCase();
-      // Fetch latest state to see if member exists
       const sRes = await fetch("/api/state");
       if (!sRes.ok) return;
       const data = await sRes.json();
@@ -95,7 +114,7 @@ export default function App() {
         const exists = data.members.some((m: any) => m.email?.toLowerCase() === emailLower);
         if (!exists) {
           console.log("Auto-onboarding Google SSO account:", user.email);
-          await fetch("/api/members", {
+          const postRes = await fetch("/api/members", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -106,38 +125,86 @@ export default function App() {
               status: "active"
             })
           });
+          if (postRes.ok) {
+            const created = await postRes.json();
+            if (created.members) {
+              setMembers(created.members);
+              return;
+            }
+          }
         }
+        setMembers(data.members);
       }
     } catch (e) {
       console.error("Failed to check/register SSO user:", e);
     }
   };
 
+  const bootstrapAuthenticatedUser = async (
+    user: any,
+    token: string | null,
+    role: string = "employee"
+  ) => {
+    setSsoError(null);
+    setSsoRole(role === "manager" ? "manager" : "employee");
+    bootstrappedUidRef.current = user.uid;
+    setGoogleUser(user);
+    setGoogleToken(token);
+    await checkAndRegisterSsoUser(user, role);
+    await fetchState();
+    void runCalendarSync(token);
+  };
+
   // Initialize Google Auth listener on mount
   useEffect(() => {
-    const unsubscribe = initAuth(
-      async (user, token) => {
-        await checkAndRegisterSsoUser(user, "employee"); // Fallback for auto-login of existing users
-        await fetchState();
-        setGoogleUser(user);
-        setGoogleToken(token);
-        // Automatically trigger initial sync
-        try {
-          setGoogleSyncing(true);
-          await syncGoogleCalendarWithBackend(token);
-          setGoogleLastSynced(new Date());
-        } catch (e) {
-          console.error("Initial Google Calendar sync failed:", e);
-        } finally {
-          setGoogleSyncing(false);
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+
+    const finishAuthBootstrap = () => {
+      if (!cancelled) setAuthBootstrapping(false);
+    };
+
+    const boot = async () => {
+      try {
+        const redirectResult = await handleAuthRedirect();
+        if (cancelled) return;
+
+        if (redirectResult) {
+          await bootstrapAuthenticatedUser(
+            redirectResult.user,
+            redirectResult.accessToken,
+            redirectResult.role
+          );
         }
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
+      } catch (err) {
+        if (!cancelled) {
+          setSsoError(getFriendlyAuthError(err));
+        }
       }
-    );
-    return () => unsubscribe();
+
+      unsubscribe = initAuth(
+        async (user, token) => {
+          if (bootstrappedUidRef.current === user.uid) {
+            finishAuthBootstrap();
+            return;
+          }
+          await bootstrapAuthenticatedUser(user, token, "employee");
+          finishAuthBootstrap();
+        },
+        () => {
+          setGoogleUser(null);
+          setGoogleToken(null);
+          finishAuthBootstrap();
+        }
+      );
+    };
+
+    void boot();
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, []);
 
   // Background Sync Service: automatically fetches every 15 minutes
@@ -163,22 +230,15 @@ export default function App() {
 
   const handleGoogleLogin = async (role: string = "employee") => {
     try {
-      setGoogleSyncing(true);
-      const res = await googleSignIn();
-      if (res) {
-        localStorage.removeItem("deadlinex-demo-mode");
-        setUseDemoMode(false);
-        await checkAndRegisterSsoUser(res.user, role);
-        await fetchState();
-        setGoogleUser(res.user);
-        setGoogleToken(res.accessToken);
-        await syncGoogleCalendarWithBackend(res.accessToken);
-        setGoogleLastSynced(new Date());
-      }
+      setSsoError(null);
+      const res = await googleSignIn(role);
+      if (!res) return;
+      localStorage.removeItem("deadlinex-demo-mode");
+      setUseDemoMode(false);
+      await bootstrapAuthenticatedUser(res.user, res.accessToken, role);
     } catch (err) {
       console.error("Google login failed:", err);
-    } finally {
-      setGoogleSyncing(false);
+      setSsoError(getFriendlyAuthError(err));
     }
   };
 
@@ -405,17 +465,44 @@ export default function App() {
     });
   }, [missions]);
 
-  // Active User Profile Context
-  const currentUser = (() => {
+  const demoManagerFallback: TeamMember = {
+    id: "mem-1",
+    name: "Souparno (You)",
+    role: "manager",
+    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&h=150&q=80",
+    xp: 0,
+    level: 1,
+    coins: 0,
+    completedMissions: 0,
+    onTimeRate: 100,
+    status: "active",
+    email: "demo@deadlinex.local",
+  };
+
+  // Active User Profile Context — use a provisional profile so SSO never blocks on server sync
+  const currentUser = useMemo((): TeamMember | null => {
     if (useDemoMode) {
-      return members.find(m => m.id === "mem-1") || null;
+      return members.find(m => m.id === "mem-1") || demoManagerFallback;
     }
-    if (googleUser && googleUser.email) {
+    if (googleUser?.email) {
       const match = members.find(m => m.email?.toLowerCase() === googleUser.email.toLowerCase());
       if (match) return match;
+      return {
+        id: `sso-${googleUser.uid}`,
+        name: googleUser.displayName || googleUser.email.split("@")[0],
+        email: googleUser.email,
+        role: ssoRole,
+        avatar: googleUser.photoURL || demoManagerFallback.avatar,
+        xp: 0,
+        level: 1,
+        coins: 0,
+        completedMissions: 0,
+        onTimeRate: 100,
+        status: "active",
+      };
     }
     return members.find(m => m.id === "mem-1") || null;
-  })();
+  }, [useDemoMode, members, googleUser, ssoRole]);
 
   // Load state from REST database
   const fetchState = async () => {
@@ -699,9 +786,29 @@ export default function App() {
   }
 
   // 1. SPLIT-PANEL LOGIN VIEW (skip when demo mode is active)
+  if (authBootstrapping && !googleUser && !useDemoMode) {
+    return (
+      <div className={`min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4 ${theme === "light" ? "light" : ""}`}>
+        <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-sm text-slate-400 font-mono font-bold uppercase tracking-wider">Restoring session...</p>
+      </div>
+    );
+  }
+
   if (!googleUser && !useDemoMode) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col font-sans">
+        {ssoError && (
+          <div className="bg-red-950/80 border-b border-red-900/50 px-6 py-3 flex items-center justify-between gap-4">
+            <p className="text-sm text-red-300">{ssoError}</p>
+            <button
+              onClick={() => setSsoError(null)}
+              className="text-red-400 hover:text-red-200 text-xs font-bold uppercase tracking-wider shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <div className="flex flex-1">
         {/* Manager Portal */}
         <div className="flex-1 flex flex-col items-center justify-center border-r border-slate-800 p-8 hover:bg-slate-900/50 transition-colors group relative">
@@ -752,15 +859,6 @@ export default function App() {
             <Sparkles className="w-4 h-4" /> Launch Demo Workspace
           </button>
         </div>
-      </div>
-    );
-  }
-
-  if (!currentUser) {
-    return (
-      <div className={`min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4 ${theme === "light" ? "light" : ""}`}>
-        <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-sm text-slate-400 font-mono font-bold uppercase tracking-wider">Synchronizing Profile...</p>
       </div>
     );
   }
