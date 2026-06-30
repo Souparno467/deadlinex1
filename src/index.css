@@ -1,0 +1,70 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-slate-950: #080808;
+  --color-slate-900: #121212;
+  --color-slate-850: #1a1a1a;
+  --color-slate-800: #222222;
+  --color-slate-750: #2c2c2c;
+  --color-slate-700: #333333;
+  --color-slate-600: #555555;
+  --color-slate-500: #707070;
+  --color-slate-400: #9e9e9e;
+  --color-slate-300: #d1d1d1;
+  --color-slate-200: #e5e5e5;
+  --color-slate-100: #ffffff;
+
+  --color-red-950: #2A1008;
+  --color-red-900: #4a1505;
+  --color-red-600: #E03600;
+  --color-red-500: #FF3D00;
+  --color-red-400: #ff6433;
+
+  --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "Courier New", Courier, monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-slate-950);
+  color: var(--color-slate-100);
+}
+
+.light {
+  --color-slate-950: #ffffff;
+  --color-slate-900: #f8fafc;
+  --color-slate-850: #f1f5f9;
+  --color-slate-800: #e2e8f0;
+  --color-slate-750: #cbd5e1;
+  --color-slate-700: #94a3b8;
+  --color-slate-600: #64748b;
+  --color-slate-500: #475569;
+  --color-slate-400: #334155;
+  --color-slate-300: #1e293b;
+  --color-slate-200: #0f172a;
+  --color-slate-100: #020617;
+
+  --color-red-950: #fef2f2;
+  --color-red-900: #fee2e2;
+  --color-red-600: #b91c1c;
+  --color-red-500: #dc2626;
+  --color-red-400: #ef4444;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-slate-900);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-slate-700);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-slate-600);
+}

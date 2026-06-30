@@ -1,0 +1,6 @@
+{
+  "name": "DeadlineX",
+  "description": "Execution OS – AI Chief of Staff. An AI-powered productivity platform with deadline risk prediction, gamification (missions, XP, leaderboards), and smart calendar scheduling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
